@@ -25,6 +25,89 @@
 #include <string_view>
 #include <type_traits>
 #include <cstdint>
+#include <cstring>
+
+namespace std {
+template <>
+struct char_traits<uint8_t> : public char_traits<char> {
+    using char_type = uint8_t;
+    using int_type = unsigned int;
+
+    static void assign(char_type& r, const char_type& a) noexcept {
+        r = a;
+    }
+
+    static char_type* assign(char_type* p, size_t count, char_type a) {
+        for (size_t i = 0; i < count; ++i) {
+            p[i] = a;
+        }
+        return p;
+    }
+
+    static constexpr bool eq(char_type a, char_type b) noexcept {
+        return a == b;
+    }
+
+    static constexpr bool lt(char_type a, char_type b) noexcept {
+        return a < b;
+    }
+
+    static char_type* move(char_type* dest, const char_type* src, size_t count) {
+        if (count == 0) return dest;
+        memmove(dest, src, count);
+        return dest;
+    }
+
+    static char_type* copy(char_type* dest, const char_type* src, size_t count) {
+        if (count == 0) return dest;
+        memcpy(dest, src, count);
+        return dest;
+    }
+
+    static constexpr int compare(const char_type* s1, const char_type* s2, size_t count) {
+        for (size_t i = 0; i < count; ++i) {
+            if (lt(s1[i], s2[i])) return -1;
+            if (lt(s2[i], s1[i])) return 1;
+        }
+        return 0;
+    }
+
+    static constexpr size_t length(const char_type* s) {
+        size_t len = 0;
+        while (!eq(s[len], char_type())) {
+            ++len;
+        }
+        return len;
+    }
+
+    static constexpr const char_type* find(const char_type* s, size_t count, const char_type& ch) {
+        for (size_t i = 0; i < count; ++i) {
+            if (eq(s[i], ch)) return s + i;
+        }
+        return nullptr;
+    }
+
+    static constexpr char_type to_char_type(int_type c) noexcept {
+        return static_cast<char_type>(c);
+    }
+
+    static constexpr int_type to_int_type(char_type c) noexcept {
+        return static_cast<int_type>(c);
+    }
+
+    static constexpr bool eq_int_type(int_type c1, int_type c2) noexcept {
+        return c1 == c2;
+    }
+
+    static constexpr int_type eof() noexcept {
+        return static_cast<int_type>(-1);
+    }
+
+    static constexpr int_type not_eof(int_type e) noexcept {
+        return eq_int_type(e, eof()) ? 0 : e;
+    }
+};
+} // namespace std
 
 namespace parquet4seastar {
 
