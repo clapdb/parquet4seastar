@@ -345,3 +345,144 @@ SEASTAR_TEST_CASE(delta_binary_packed_negative_deltas) {
 
     return seastar::async([]() {});
 }
+
+// Test DELTA_BYTE_ARRAY decoder with large batch
+// Validates the optimized exponential growth reserve() strategy
+SEASTAR_TEST_CASE(delta_byte_array_large_batch) {
+    using namespace parquet4seastar;
+
+    auto encoder = make_value_encoder<format::Type::BYTE_ARRAY>(format::Encoding::DELTA_BYTE_ARRAY);
+    auto decoder = value_decoder<format::Type::BYTE_ARRAY>({});
+
+    // Generate large dataset (> 4000 values to exceed initial reserve)
+    std::vector<seastar::temporary_buffer<uint8_t>> input_strings;
+    std::vector<bytes_view> input_views;
+    input_strings.reserve(6000);
+    input_views.reserve(6000);
+
+    // Create strings with common prefixes to benefit from delta encoding
+    std::string base = "https://example.com/api/v1/users/";
+    for (size_t i = 0; i < 6000; ++i) {
+        std::string s = base + std::to_string(i) + "/profile?detailed=true";
+        auto buf = seastar::temporary_buffer<uint8_t>(s.size());
+        std::memcpy(buf.get_write(), s.data(), s.size());
+        input_views.emplace_back(buf.get(), buf.size());
+        input_strings.push_back(std::move(buf));
+    }
+
+    encoder->put_batch(input_views.data(), input_views.size());
+
+    bytes encoded(encoder->max_encoded_size(), 0);
+    auto [n_written, encoding] = encoder->flush(encoded.data());
+    encoded.resize(n_written);
+
+    decoder.reset(encoded, format::Encoding::DELTA_BYTE_ARRAY);
+
+    std::vector<seastar::temporary_buffer<uint8_t>> decoded;
+    decoded.resize(input_views.size());
+    size_t n_read = decoder.read_batch(decoded.size(), decoded.data());
+    decoded.resize(n_read);
+
+    BOOST_CHECK_EQUAL(decoded.size(), input_views.size());
+    for (size_t i = 0; i < decoded.size(); ++i) {
+        BOOST_CHECK_EQUAL(decoded[i].size(), input_views[i].size());
+        BOOST_CHECK(std::equal(decoded[i].begin(), decoded[i].end(),
+                               input_views[i].begin(), input_views[i].end()));
+    }
+
+    return seastar::async([]() {});
+}
+
+// Test DELTA_BYTE_ARRAY with growing string pattern
+// Validates the optimized last_string reserve() to avoid reallocations
+SEASTAR_TEST_CASE(delta_byte_array_growing_strings) {
+    using namespace parquet4seastar;
+
+    auto encoder = make_value_encoder<format::Type::BYTE_ARRAY>(format::Encoding::DELTA_BYTE_ARRAY);
+    auto decoder = value_decoder<format::Type::BYTE_ARRAY>({});
+
+    // Generate strings that grow progressively to stress-test reallocation
+    std::vector<seastar::temporary_buffer<uint8_t>> input_strings;
+    std::vector<bytes_view> input_views;
+    input_strings.reserve(500);
+    input_views.reserve(500);
+
+    // Pattern: strings that share growing prefixes
+    for (size_t i = 0; i < 500; ++i) {
+        // Each string shares prefix with previous, but grows
+        std::string s(i, 'A');  // Growing prefix
+        s += "_suffix_" + std::to_string(i);
+        auto buf = seastar::temporary_buffer<uint8_t>(s.size());
+        std::memcpy(buf.get_write(), s.data(), s.size());
+        input_views.emplace_back(buf.get(), buf.size());
+        input_strings.push_back(std::move(buf));
+    }
+
+    encoder->put_batch(input_views.data(), input_views.size());
+
+    bytes encoded(encoder->max_encoded_size(), 0);
+    auto [n_written, encoding] = encoder->flush(encoded.data());
+    encoded.resize(n_written);
+
+    decoder.reset(encoded, format::Encoding::DELTA_BYTE_ARRAY);
+
+    std::vector<seastar::temporary_buffer<uint8_t>> decoded;
+    decoded.resize(input_views.size());
+    size_t n_read = decoder.read_batch(decoded.size(), decoded.data());
+    decoded.resize(n_read);
+
+    BOOST_CHECK_EQUAL(decoded.size(), input_views.size());
+    for (size_t i = 0; i < decoded.size(); ++i) {
+        BOOST_CHECK_EQUAL(decoded[i].size(), input_views[i].size());
+        BOOST_CHECK(std::equal(decoded[i].begin(), decoded[i].end(),
+                               input_views[i].begin(), input_views[i].end()));
+    }
+
+    return seastar::async([]() {});
+}
+
+// Test dictionary decoder with large batch
+// Validates the increased buffer size (256 -> 1024) optimization
+SEASTAR_TEST_CASE(dictionary_decoder_large_batch) {
+    using namespace parquet4seastar;
+
+    auto encoder = make_value_encoder<format::Type::INT32>(format::Encoding::RLE_DICTIONARY);
+
+    // Generate data with moderate cardinality (500 unique values)
+    // but 10000 total values to stress-test batch processing
+    std::vector<int32_t> input;
+    input.reserve(10000);
+
+    for (int i = 0; i < 10000; ++i) {
+        input.push_back(i % 500);  // 500 unique values, repeated
+    }
+
+    encoder->put_batch(input.data(), input.size());
+
+    bytes dict_page(encoder->view_dict()->size(), 0);
+    std::copy(encoder->view_dict()->begin(), encoder->view_dict()->end(), dict_page.begin());
+
+    bytes data_page(encoder->max_encoded_size(), 0);
+    auto [n_written, encoding] = encoder->flush(data_page.data());
+    data_page.resize(n_written);
+
+    // Decode dictionary page
+    auto dict_decoder = value_decoder<format::Type::INT32>({});
+    dict_decoder.reset(dict_page, format::Encoding::PLAIN);
+    std::vector<int32_t> dict(500);
+    dict_decoder.read_batch(500, dict.data());
+
+    // Decode data page
+    auto data_decoder = value_decoder<format::Type::INT32>({});
+    data_decoder.reset_dict(dict.data(), 500);
+    data_decoder.reset(data_page, format::Encoding::RLE_DICTIONARY);
+
+    std::vector<int32_t> decoded(input.size());
+    size_t n_read = data_decoder.read_batch(decoded.size(), decoded.data());
+    decoded.resize(n_read);
+
+    BOOST_CHECK_EQUAL(decoded.size(), input.size());
+    BOOST_CHECK_EQUAL_COLLECTIONS(input.begin(), input.end(), decoded.begin(), decoded.end());
+
+    return seastar::async([]() {});
+}
