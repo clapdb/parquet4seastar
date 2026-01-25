@@ -74,6 +74,7 @@ class test_consumer
     void start_record() { events.push_back("start_record"); }
     void end_record() { events.push_back("end_record"); }
     void start_column(const std::string& name) { events.push_back("start_column:" + name); }
+    void start_field(const std::string& name) { events.push_back("start_field:" + name); }
     void start_struct() { events.push_back("start_struct"); }
     void end_struct() { events.push_back("end_struct"); }
     void start_list() { events.push_back("start_list"); }
