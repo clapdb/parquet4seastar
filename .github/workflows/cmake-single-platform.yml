@@ -40,6 +40,10 @@ jobs:
       - name: work around permission issue
         run: git config --global --add safe.directory ${{ github.workspace }}
 
+      - name: Install dependencies
+        run: |
+          sudo dnf install -y fmt-devel boost-devel snappy-devel || true
+
       - name: Get Seastar
         run: |
           if [ ! -d "seastar" ]; then
