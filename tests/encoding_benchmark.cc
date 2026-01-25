@@ -525,6 +525,9 @@ benchmark_result benchmark_compression(format::CompressionCodec::type codec, siz
         case format::CompressionCodec::GZIP:
             result.name = "GZIP Compression";
             break;
+        case format::CompressionCodec::LZ4:
+            result.name = "LZ4 Compression";
+            break;
         default:
             result.name = "UNCOMPRESSED";
             break;
@@ -617,6 +620,9 @@ int main(int argc, char** argv) {
 
             // Compression benchmarks
             std::cout << "\n[Compression - " << small_count << " bytes, " << iterations << " iterations]" << std::endl;
+            results.push_back(benchmark_compression(format::CompressionCodec::LZ4, small_count, iterations));
+            results.back().print();
+
             results.push_back(benchmark_compression(format::CompressionCodec::ZSTD, small_count, iterations));
             results.back().print();
 

@@ -22,6 +22,8 @@
 #include <snappy.h>
 #include <zlib.h>
 #include <zstd.h>
+#include <lz4.h>
+#include <lz4frame.h>
 
 #include <parquet4seastar/compression.hh>
 #include <parquet4seastar/exception.hh>
@@ -189,6 +191,64 @@ class zstd_compressor final : public compressor
     format::CompressionCodec::type type() const override { return format::CompressionCodec::ZSTD; }
 };
 
+class lz4_compressor final : public compressor
+{
+    bytes decompress(bytes_view in, bytes&& out) const override {
+        if (in.size() == 0) {
+            out.clear();
+            return std::move(out);
+        }
+
+        // LZ4 frame format decompression
+        LZ4F_decompressionContext_t dctx;
+        LZ4F_errorCode_t err = LZ4F_createDecompressionContext(&dctx, LZ4F_VERSION);
+        if (LZ4F_isError(err)) {
+            throw parquet_exception(seastar::format("LZ4 decompression context creation failed: {}",
+                                                    LZ4F_getErrorName(err)));
+        }
+
+        size_t src_size = in.size();
+        size_t dst_size = out.size();
+        const byte* src_ptr = in.data();
+        byte* dst_ptr = out.data();
+
+        err = LZ4F_decompress(dctx, dst_ptr, &dst_size, src_ptr, &src_size, nullptr);
+        LZ4F_freeDecompressionContext(dctx);
+
+        if (LZ4F_isError(err)) {
+            throw parquet_exception(seastar::format("LZ4 decompression failed: {}",
+                                                    LZ4F_getErrorName(err)));
+        }
+
+        out.resize(dst_size);
+        return std::move(out);
+    }
+
+    bytes compress(bytes_view in, bytes&& out) const override {
+        if (in.size() == 0) {
+            out.clear();
+            return std::move(out);
+        }
+
+        // Use LZ4 frame format for compatibility
+        size_t const max_compressed_size = LZ4F_compressFrameBound(in.size(), nullptr);
+        out.resize(max_compressed_size);
+
+        size_t const compressed_size = LZ4F_compressFrame(
+            out.data(), out.size(), in.data(), in.size(), nullptr);
+
+        if (LZ4F_isError(compressed_size)) {
+            throw parquet_exception(seastar::format("LZ4 compression failed: {}",
+                                                    LZ4F_getErrorName(compressed_size)));
+        }
+
+        out.resize(compressed_size);
+        return std::move(out);
+    }
+
+    format::CompressionCodec::type type() const override { return format::CompressionCodec::LZ4; }
+};
+
 std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type compression) {
     if (compression == format::CompressionCodec::UNCOMPRESSED) {
         return std::make_unique<uncompressed_compressor>();
@@ -198,6 +258,8 @@ std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type comp
         return std::make_unique<snappy_compressor>();
     } else if (compression == format::CompressionCodec::ZSTD) {
         return std::make_unique<zstd_compressor>();
+    } else if (compression == format::CompressionCodec::LZ4) {
+        return std::make_unique<lz4_compressor>();
     } else {
         throw parquet_exception(seastar::format("Unsupported compression ({})", static_cast<int32_t>(compression)));
     }

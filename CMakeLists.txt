@@ -30,6 +30,8 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(Snappy REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(zstd REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LZ4 REQUIRED liblz4)
 
 set(MIN_Thrift_VERSION 0.11.0)
 find_package(Thrift ${MIN_Thrift_VERSION} REQUIRED)
@@ -81,6 +83,7 @@ target_link_libraries(parquet4seastar
         ZLIB::ZLIB
         Snappy::snappy
         zstd
+        ${LZ4_LIBRARIES}
 )
 
 target_include_directories(parquet4seastar
@@ -89,6 +92,7 @@ target_include_directories(parquet4seastar
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${LZ4_INCLUDE_DIRS}
 )
 
 include(GNUInstallDirs)
