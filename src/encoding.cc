@@ -723,7 +723,10 @@ class plain_encoder : public value_encoder<ParquetType>
         size_t size = _buf.size() * sizeof(input_type);
         return {data, size};
     }
-    void put_batch(const input_type data[], size_t size) override { _buf.insert(_buf.end(), data, data + size); }
+    void put_batch(const input_type data[], size_t size) override {
+        _buf.reserve(_buf.size() + size);
+        _buf.insert(_buf.end(), data, data + size);
+    }
     size_t max_encoded_size() const override { return view().size(); }
     flush_result flush(byte sink[]) override {
         bytes_view v = view();
