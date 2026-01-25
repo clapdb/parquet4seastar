@@ -325,8 +325,10 @@ class delta_length_byte_array_decoder final : public decoder<format::Type::BYTE_
         _len_decoder.reset(data);
 
         _lengths.clear();
-        // Pre-allocate reasonable capacity to avoid repeated reallocations
-        _lengths.reserve(BATCH_SIZE * 4);
+        // Reuse existing capacity if sufficient, otherwise pre-allocate
+        if (_lengths.capacity() < BATCH_SIZE * 4) {
+            _lengths.reserve(BATCH_SIZE * 4);
+        }
 
         int32_t batch_buffer[BATCH_SIZE];
         while (true) {
@@ -388,9 +390,11 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
 
         _len_decoder.reset(data);
         _lengths.clear();
-        // Pre-allocate estimated capacity to reduce reallocations
+        // Reuse existing capacity if sufficient, otherwise pre-allocate
         // Most pages have 1000-10000 values, start with 4x BATCH_SIZE
-        _lengths.reserve(BATCH_SIZE * 4);
+        if (_lengths.capacity() < BATCH_SIZE * 4) {
+            _lengths.reserve(BATCH_SIZE * 4);
+        }
 
         int32_t batch_buffer[BATCH_SIZE];
         while (true) {
