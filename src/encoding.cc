@@ -311,7 +311,7 @@ class delta_length_byte_array_decoder final : public decoder<format::Type::BYTE_
         n = std::min(n, _lengths.size() - _current_idx);
         for (size_t i = 0; i < n; ++i) {
             uint32_t len = _lengths[_current_idx];
-            if (len > _values.size()) {
+            if (__builtin_expect(len > _values.size(), false)) {
                 throw parquet_exception("Unexpected end of values in DELTA_LENGTH_BYTE_ARRAY");
             }
             out[i] = _values.share(0, len);
@@ -366,7 +366,7 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
         for (size_t i = 0; i < n; ++i) {
             uint32_t prefix_len = _lengths[i];
             const tb& suffix = _suffixes[i];
-            if (prefix_len > _last_string.size()) {
+            if (__builtin_expect(prefix_len > _last_string.size(), false)) {
                 throw parquet_exception("Invalid prefix length in DELTA_BYTE_ARRAY");
             }
             out[i] = tb(prefix_len + suffix.size());
@@ -523,17 +523,17 @@ size_t plain_decoder_boolean::read_batch(size_t n, uint8_t out[]) { return _deco
 
 size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<uint8_t> out[]) {
     for (size_t i = 0; i < n; ++i) {
-        if (_buffer.size() == 0) {
+        if (__builtin_expect(_buffer.size() == 0, false)) {
             return i;
         }
-        if (_buffer.size() < 4) {
+        if (__builtin_expect(_buffer.size() < 4, false)) {
             throw parquet_exception::corrupted_file(
               seastar::format("End of page while reading BYTE_ARRAY length (needed {}B, got {}B)", 4, _buffer.size()));
         }
         uint32_t len;
         std::memcpy(&len, _buffer.get(), 4);
         _buffer.trim_front(4);
-        if (len > _buffer.size()) {
+        if (__builtin_expect(len > _buffer.size(), false)) {
             throw parquet_exception::corrupted_file(
               seastar::format("End of page while reading BYTE_ARRAY (needed {}B, got {}B)", len, _buffer.size()));
         }
@@ -545,10 +545,10 @@ size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<
 
 size_t plain_decoder_fixed_len_byte_array::read_batch(size_t n, seastar::temporary_buffer<uint8_t> out[]) {
     for (size_t i = 0; i < n; ++i) {
-        if (_buffer.size() == 0) {
+        if (__builtin_expect(_buffer.size() == 0, false)) {
             return i;
         }
-        if (_fixed_len > _buffer.size()) {
+        if (__builtin_expect(_fixed_len > _buffer.size(), false)) {
             throw parquet_exception::corrupted_file(seastar::format(
               "End of page while reading FIXED_LEN_BYTE_ARRAY (needed {}B, got {}B)", _fixed_len, _buffer.size()));
         }
