@@ -29,6 +29,7 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 find_package(Snappy REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(zstd REQUIRED)
 
 set(MIN_Thrift_VERSION 0.11.0)
 find_package(Thrift ${MIN_Thrift_VERSION} REQUIRED)
@@ -79,6 +80,7 @@ target_link_libraries(parquet4seastar
         Thrift::thrift
         ZLIB::ZLIB
         Snappy::snappy
+        zstd
 )
 
 target_include_directories(parquet4seastar

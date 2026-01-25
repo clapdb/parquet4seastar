@@ -62,4 +62,10 @@ SEASTAR_TEST_CASE(compression_snappy) {
     return seastar::async([]() {});
 }
 
+SEASTAR_TEST_CASE(compression_zstd) {
+    test_compression_happy(format::CompressionCodec::ZSTD);
+    test_compression_overflow(format::CompressionCodec::ZSTD);
+    return seastar::async([]() {});
+}
+
 }  // namespace parquet4seastar::compression

@@ -21,6 +21,7 @@
 
 #include <snappy.h>
 #include <zlib.h>
+#include <zstd.h>
 
 #include <parquet4seastar/compression.hh>
 #include <parquet4seastar/exception.hh>
@@ -143,6 +144,51 @@ class gzip_compressor final : public compressor
     format::CompressionCodec::type type() const override { return format::CompressionCodec::GZIP; }
 };
 
+class zstd_compressor final : public compressor
+{
+    bytes decompress(bytes_view in, bytes&& out) const override {
+        size_t const decompressed_size = ZSTD_getFrameContentSize(in.data(), in.size());
+
+        if (decompressed_size == ZSTD_CONTENTSIZE_ERROR) {
+            throw parquet_exception::corrupted_file("ZSTD frame content size error");
+        }
+        if (decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+            throw parquet_exception::corrupted_file("ZSTD content size unknown");
+        }
+
+        if (out.size() < decompressed_size) {
+            throw parquet_exception::corrupted_file("Uncompression buffer size too small");
+        }
+
+        out.resize(decompressed_size);
+        size_t const result = ZSTD_decompress(out.data(), out.size(), in.data(), in.size());
+
+        if (ZSTD_isError(result)) {
+            throw parquet_exception(seastar::format("ZSTD decompression failure: {}", ZSTD_getErrorName(result)));
+        }
+
+        out.resize(result);
+        return std::move(out);
+    }
+
+    bytes compress(bytes_view in, bytes&& out) const override {
+        size_t const max_compressed_size = ZSTD_compressBound(in.size());
+        out.resize(max_compressed_size);
+
+        // Use ZSTD default compression level (3)
+        size_t const compressed_size = ZSTD_compress(out.data(), out.size(), in.data(), in.size(), ZSTD_defaultCLevel());
+
+        if (ZSTD_isError(compressed_size)) {
+            throw parquet_exception(seastar::format("ZSTD compression failure: {}", ZSTD_getErrorName(compressed_size)));
+        }
+
+        out.resize(compressed_size);
+        return std::move(out);
+    }
+
+    format::CompressionCodec::type type() const override { return format::CompressionCodec::ZSTD; }
+};
+
 std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type compression) {
     if (compression == format::CompressionCodec::UNCOMPRESSED) {
         return std::make_unique<uncompressed_compressor>();
@@ -150,6 +196,8 @@ std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type comp
         return std::make_unique<gzip_compressor>();
     } else if (compression == format::CompressionCodec::SNAPPY) {
         return std::make_unique<snappy_compressor>();
+    } else if (compression == format::CompressionCodec::ZSTD) {
+        return std::make_unique<zstd_compressor>();
     } else {
         throw parquet_exception(seastar::format("Unsupported compression ({})", static_cast<int32_t>(compression)));
     }
