@@ -370,8 +370,12 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
                 throw parquet_exception("Invalid prefix length in DELTA_BYTE_ARRAY");
             }
             out[i] = tb(prefix_len + suffix.size());
-            std::copy_n(_last_string.begin(), prefix_len, out[i].get_write());
-            std::copy(suffix.begin(), suffix.end(), out[i].get_write() + prefix_len);
+            if (prefix_len > 0) {
+                std::memcpy(out[i].get_write(), _last_string.data(), prefix_len);
+            }
+            if (suffix.size() > 0) {
+                std::memcpy(out[i].get_write() + prefix_len, suffix.get(), suffix.size());
+            }
 
             // Resize to prefix length, then append suffix
             // Reserve capacity to avoid reallocation when strings grow
@@ -734,7 +738,9 @@ class plain_encoder : public value_encoder<ParquetType>
     size_t max_encoded_size() const override { return view().size(); }
     flush_result flush(byte sink[]) override {
         bytes_view v = view();
-        std::copy(v.begin(), v.end(), sink);
+        if (v.size() > 0) {
+            std::memcpy(sink, v.data(), v.size());
+        }
         _buf.clear();
         return {v.size(), format::Encoding::PLAIN};
     }
@@ -775,8 +781,10 @@ class plain_encoder<format::Type::BYTE_ARRAY> : public value_encoder<format::Typ
     }
     size_t max_encoded_size() const override { return _buf.size(); }
     flush_result flush(byte sink[]) override {
-        std::copy(_buf.begin(), _buf.end(), sink);
         size_t size = _buf.size();
+        if (size > 0) {
+            std::memcpy(sink, _buf.data(), size);
+        }
         _buf.clear();
         return {size, format::Encoding::PLAIN};
     }
@@ -811,8 +819,10 @@ class plain_encoder<format::Type::FIXED_LEN_BYTE_ARRAY> : public value_encoder<f
     }
     size_t max_encoded_size() const override { return _buf.size(); }
     flush_result flush(byte sink[]) override {
-        std::copy(_buf.begin(), _buf.end(), sink);
         size_t size = _buf.size();
+        if (size > 0) {
+            std::memcpy(sink, _buf.data(), size);
+        }
         _buf.clear();
         return {size, format::Encoding::PLAIN};
     }
@@ -1115,11 +1125,13 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
         header_writer.Flush();
 
         byte* data_pos = sink + header_writer.bytes_written();
-        std::copy(_encoded_buffer.begin(), _encoded_buffer.end(), data_pos);
+        size_t encoder_buffer_size = _encoded_buffer.size();
+        if (encoder_buffer_size > 0) {
+            std::memcpy(data_pos, _encoded_buffer.data(), encoder_buffer_size);
+        }
         _total_values = 0;
         _first_value = 0;
         _last_value = 0;
-        size_t encoder_buffer_size = _encoded_buffer.size();
         _encoded_buffer.clear();
         return {encoder_buffer_size + header_writer.bytes_written(), format::Encoding::DELTA_BINARY_PACKED};
     }
