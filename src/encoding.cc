@@ -316,17 +316,22 @@ class delta_length_byte_array_decoder final : public decoder<format::Type::BYTE_
         delta_binary_packed_decoder<format::Type::INT32> _len_decoder;
         _len_decoder.reset(data);
 
-        size_t lengths_read = 0;
+        _lengths.clear();
+        // Pre-allocate reasonable capacity to avoid repeated reallocations
+        _lengths.reserve(BATCH_SIZE * 4);
+
+        int32_t batch_buffer[BATCH_SIZE];
         while (true) {
-            _lengths.resize(lengths_read + BATCH_SIZE);
-            int32_t* output = _lengths.data() + _lengths.size() - BATCH_SIZE;
-            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, batch_buffer);
             if (n_read == 0) {
                 break;
             }
-            lengths_read += n_read;
+            // Ensure capacity before inserting
+            if (_lengths.size() + n_read > _lengths.capacity()) {
+                _lengths.reserve(_lengths.capacity() * 2);
+            }
+            _lengths.insert(_lengths.end(), batch_buffer, batch_buffer + n_read);
         }
-        _lengths.resize(lengths_read);
 
         size_t len_bytes = data.size() - _len_decoder.bytes_left();
         data.remove_prefix(len_bytes);
@@ -704,6 +709,14 @@ class plain_encoder<format::Type::BYTE_ARRAY> : public value_encoder<format::Typ
    public:
     bytes_view view() const { return {_buf.data(), _buf.size()}; }
     void put_batch(const input_type data[], size_t size) override {
+        // Pre-calculate total size needed: 4 bytes per length + all string data
+        size_t total_size = 0;
+        for (size_t i = 0; i < size; ++i) {
+            total_size += sizeof(uint32_t) + data[i].size();
+        }
+        // Reserve space to avoid repeated reallocations
+        _buf.reserve(_buf.size() + total_size);
+
         for (size_t i = 0; i < size; ++i) {
             put(data[i]);
         }
@@ -735,6 +748,11 @@ class plain_encoder<format::Type::FIXED_LEN_BYTE_ARRAY> : public value_encoder<f
    public:
     bytes_view view() const { return {_buf.data(), _buf.size()}; }
     void put_batch(const input_type data[], size_t size) override {
+        // Pre-reserve space for all fixed-length values
+        if (size > 0) {
+            size_t total_size = data[0].size() * size;
+            _buf.reserve(_buf.size() + total_size);
+        }
         for (size_t i = 0; i < size; ++i) {
             put(data[i]);
         }
@@ -940,23 +958,26 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
         unsigned_type max_deltas[MINIBLOCKS_PER_BLOCK] = {};
         unsigned_type bit_widths[MINIBLOCKS_PER_BLOCK] = {};
 
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
+        // First pass: compute deltas and find min_delta simultaneously
+        signed_type min_delta = static_cast<signed_type>(
+            static_cast<unsigned_type>(_unencoded_values[0]) - static_cast<unsigned_type>(_last_value));
+        deltas[0] = static_cast<unsigned_type>(_unencoded_values[0]) - static_cast<unsigned_type>(_last_value);
+        _last_value = _unencoded_values[0];
+
+        for (size_t i = 1; i < _unencoded_values.size(); ++i) {
             deltas[i] = static_cast<unsigned_type>(_unencoded_values[i]) - static_cast<unsigned_type>(_last_value);
             _last_value = _unencoded_values[i];
-        }
-
-        signed_type min_delta = deltas[0];
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             // Implementation-defined behaviour!
             min_delta = std::min(min_delta, static_cast<signed_type>(deltas[i]));
         }
+
+        // Second pass: adjust deltas by min_delta and compute max_deltas per miniblock
         for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             deltas[i] = deltas[i] - static_cast<unsigned_type>(min_delta);
-        }
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             size_t miniblock = i / VALUES_PER_MINIBLOCK;
             max_deltas[miniblock] = std::max(max_deltas[miniblock], deltas[i]);
         }
+
         for (size_t mb = 0; mb < MINIBLOCKS_PER_BLOCK; ++mb) {
             bit_widths[mb] = bit_width(max_deltas[mb]);
         }
