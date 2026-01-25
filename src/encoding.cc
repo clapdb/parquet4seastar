@@ -173,6 +173,14 @@ class delta_binary_packed_decoder final : public decoder<ParquetType>
             }
         }
         _mini_block_idx = 0;
+
+        // Prefetch bit widths for next few miniblocks to reduce cache misses
+        if (_num_mini_blocks > 0) {
+            __builtin_prefetch(_delta_bit_widths.data(), 0, 3);
+        }
+        if (_num_mini_blocks > 1) {
+            __builtin_prefetch(_delta_bit_widths.data() + 1, 0, 2);
+        }
     }
 
    public:
@@ -429,7 +437,14 @@ class byte_stream_split_decoder final : public decoder<ParquetType>
         }
 
         // Process values using pre-calculated stream pointers
+        constexpr size_t PREFETCH_DISTANCE = 64; // Cache line prefetch ahead
         for (size_t i = 0; i < n; ++i) {
+            // Prefetch next cache line from each stream
+            if (i + PREFETCH_DISTANCE < n) {
+                for (size_t k = 0; k < kNumStreams; ++k) {
+                    __builtin_prefetch(&streams[k][i + PREFETCH_DISTANCE], 0, 3);
+                }
+            }
             for (size_t k = 0; k < kNumStreams; ++k) {
                 out_bytes[k] = streams[k][i];
             }
@@ -539,19 +554,27 @@ size_t dict_decoder<ParquetType>::read_batch(size_t n, output_type out[]) {
     while (completed < n) {
         size_t n_to_read = std::min(n - completed, std::size(buf));
         size_t n_read = _rle_decoder.GetBatch(std::data(buf), n_to_read);
+
+        // Batch validate all indices first (better branch prediction)
         for (size_t i = 0; i < n_read; ++i) {
-            if (buf[i] > _dict_size) {
+            if (__builtin_expect(buf[i] > _dict_size, false)) {
                 throw parquet_exception::corrupted_file(
                   seastar::format("Dict index exceeds dict size (dict size = {}, index = {})", _dict_size, buf[i]));
             }
-            if constexpr (std::is_trivially_copyable_v<output_type>) {
-                out[completed] = _dict[buf[i]];
-            } else {
-                // Why isn't seastar::temporary_buffer copyable though?
-                out[completed] = _dict[buf[i]].share();
-            }
-            ++completed;
         }
+
+        // Now perform dictionary lookups without bounds checking
+        if constexpr (std::is_trivially_copyable_v<output_type>) {
+            for (size_t i = 0; i < n_read; ++i) {
+                out[completed + i] = _dict[buf[i]];
+            }
+        } else {
+            for (size_t i = 0; i < n_read; ++i) {
+                out[completed + i] = _dict[buf[i]].share();
+            }
+        }
+        completed += n_read;
+
         if (n_read < n_to_read) {
             break;
         }

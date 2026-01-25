@@ -289,17 +289,35 @@ inline int RleDecoder::GetBatch(T* values, int batch_size) {
   while (values_read < batch_size) {
     int remaining = batch_size - values_read;
 
-    if (repeat_count_ > 0) {
+    if (__builtin_expect(repeat_count_ > 0, true)) {
+      // Fast path: repeat run (common case)
       int repeat_batch = std::min(remaining, repeat_count_);
-      std::fill(out, out + repeat_batch, static_cast<T>(current_value_));
+
+      // Optimized fill for common scalar types
+      if constexpr (sizeof(T) == 8 && std::is_integral_v<T>) {
+        // Direct 64-bit stores for int64_t/uint64_t
+        T val = static_cast<T>(current_value_);
+        for (int i = 0; i < repeat_batch; ++i) {
+          out[i] = val;
+        }
+      } else if constexpr (sizeof(T) == 4 && std::is_integral_v<T>) {
+        // Direct 32-bit stores for int32_t/uint32_t
+        T val = static_cast<T>(current_value_);
+        for (int i = 0; i < repeat_batch; ++i) {
+          out[i] = val;
+        }
+      } else {
+        std::fill(out, out + repeat_batch, static_cast<T>(current_value_));
+      }
 
       repeat_count_ -= repeat_batch;
       values_read += repeat_batch;
       out += repeat_batch;
     } else if (literal_count_ > 0) {
+      // Literal run
       int literal_batch = std::min(remaining, literal_count_);
       int actual_read = bit_reader_.GetBatch(bit_width_, out, literal_batch);
-      if (actual_read != literal_batch) {
+      if (__builtin_expect(actual_read != literal_batch, false)) {
         return values_read;
       }
 
@@ -307,6 +325,7 @@ inline int RleDecoder::GetBatch(T* values, int batch_size) {
       values_read += literal_batch;
       out += literal_batch;
     } else {
+      // Need to read next run header
       if (!NextCounts<T>()) return values_read;
     }
   }
