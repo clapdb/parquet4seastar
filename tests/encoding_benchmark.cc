@@ -58,20 +58,25 @@ public:
 // Benchmark result
 struct benchmark_result {
     std::string name;
-    size_t iterations;
-    size_t data_size_bytes;
-    double encode_time_ms;
-    double decode_time_ms;
-    double encode_throughput_mb_s;
-    double decode_throughput_mb_s;
+    size_t iterations = 0;
+    size_t data_size_bytes = 0;
+    double encode_time_ms = 0.0;
+    double decode_time_ms = 0.0;
+    double encode_throughput_mb_s = 0.0;
+    double decode_throughput_mb_s = 0.0;
+    double compression_ratio = 0.0;  // compressed_size / original_size (0 means not applicable)
 
     void print() const {
         std::cout << std::left << std::setw(40) << name
                   << " | Encode: " << std::setw(8) << std::fixed << std::setprecision(2) << encode_time_ms << " ms"
                   << " (" << std::setw(8) << encode_throughput_mb_s << " MB/s)"
                   << " | Decode: " << std::setw(8) << decode_time_ms << " ms"
-                  << " (" << std::setw(8) << decode_throughput_mb_s << " MB/s)"
-                  << std::endl;
+                  << " (" << std::setw(8) << decode_throughput_mb_s << " MB/s)";
+        if (compression_ratio > 0) {
+            std::cout << " | Ratio: " << std::setw(6) << std::fixed << std::setprecision(2)
+                      << (compression_ratio * 100.0) << "%";
+        }
+        std::cout << std::endl;
     }
 };
 
@@ -533,10 +538,22 @@ benchmark_result benchmark_compression(format::CompressionCodec::type codec, siz
             break;
     }
 
-    // Generate test data
+    // Generate realistic test data (mix of patterns)
     bytes raw_data;
+    std::mt19937 rng(42);
+
+    // Simulate realistic data: 40% repeated values, 40% incremental, 20% random
     for (size_t i = 0; i < count; ++i) {
-        raw_data.push_back(static_cast<byte>(i % 256));
+        if (i % 10 < 4) {
+            // Repeated values (common in real data)
+            raw_data.push_back(static_cast<byte>(i / 100));
+        } else if (i % 10 < 8) {
+            // Incremental values (timestamps, IDs, etc.)
+            raw_data.push_back(static_cast<byte>(i % 256));
+        } else {
+            // Random noise
+            raw_data.push_back(static_cast<byte>(rng() % 256));
+        }
     }
 
     result.iterations = iterations;
@@ -554,6 +571,9 @@ benchmark_result benchmark_compression(format::CompressionCodec::type codec, siz
     timer.stop();
     result.encode_time_ms = timer.elapsed_ms() / iterations;
     result.encode_throughput_mb_s = timer.throughput_mb_per_sec(result.data_size_bytes * iterations);
+
+    // Calculate compression ratio
+    result.compression_ratio = static_cast<double>(compressed.size()) / static_cast<double>(raw_data.size());
 
     // Benchmark decompression
     bytes decompression_buffer(raw_data.size() + 1000, 0);
