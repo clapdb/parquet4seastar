@@ -817,6 +817,11 @@ class dict_builder
     plain_encoder<ParquetType> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        // Typical dictionary sizes: 100-10000 unique values
+        _accumulator.reserve(1024);
+    }
     uint32_t put(input_type key) {
         auto [iter, was_new_key] = _accumulator.try_emplace(key, _accumulator.size());
         if (was_new_key) {
@@ -836,6 +841,10 @@ class dict_builder<format::Type::BYTE_ARRAY>
     plain_encoder<format::Type::BYTE_ARRAY> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        _accumulator.reserve(1024);
+    }
     uint32_t put(bytes_view key) {
         auto [it, was_new_key] = _accumulator.try_emplace(bytes{key}, _accumulator.size());
         if (was_new_key) {
@@ -855,6 +864,10 @@ class dict_builder<format::Type::FIXED_LEN_BYTE_ARRAY>
     plain_encoder<format::Type::FIXED_LEN_BYTE_ARRAY> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        _accumulator.reserve(1024);
+    }
     uint32_t put(bytes_view key) {
         auto [it, was_new_key] = _accumulator.try_emplace(bytes{key}, _accumulator.size());
         if (was_new_key) {
