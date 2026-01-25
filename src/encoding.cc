@@ -370,6 +370,13 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
             out[i] = tb(prefix_len + suffix.size());
             std::copy_n(_last_string.begin(), prefix_len, out[i].get_write());
             std::copy(suffix.begin(), suffix.end(), out[i].get_write() + prefix_len);
+
+            // Resize to prefix length, then append suffix
+            // Reserve capacity to avoid reallocation when strings grow
+            size_t new_size = prefix_len + suffix.size();
+            if (new_size > _last_string.capacity()) {
+                _last_string.reserve(new_size * 3 / 2);  // 1.5x growth
+            }
             _last_string.resize(prefix_len);
             _last_string.insert(_last_string.end(), suffix.begin(), suffix.end());
         }
