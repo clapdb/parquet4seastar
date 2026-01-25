@@ -230,15 +230,51 @@ class delta_binary_packed_decoder final : public decoder<ParquetType>
                 _values_current_mini_block = _values_per_mini_block;
                 ++_mini_block_idx;
             }
-            // TODO: an optimized implementation would decode the entire
-            // miniblock at once.
-            uint64_t delta;
-            if (!_decoder.GetValue(_delta_bit_width, &delta)) {
-                throw parquet_exception("Unexpected end of data in DELTA_BINARY_PACKED");
+
+            // Batch decode deltas from the current miniblock
+            // Calculate how many deltas we can decode in this iteration
+            size_t remaining_in_output = n - i;
+            size_t remaining_in_miniblock = _values_current_mini_block;
+            size_t deltas_to_decode = std::min({remaining_in_output, remaining_in_miniblock, _values_remaining});
+
+            if (deltas_to_decode > 0 && _delta_bit_width > 0) {
+                // Use batch decoding for better performance
+                constexpr size_t kBatchSize = 128;
+                uint32_t delta_buffer[kBatchSize];
+
+                while (deltas_to_decode > 0) {
+                    size_t batch = std::min(deltas_to_decode, kBatchSize);
+                    int decoded = _decoder.GetBatch(_delta_bit_width, delta_buffer, static_cast<int>(batch));
+                    if (decoded == 0) {
+                        throw parquet_exception("Unexpected end of data in DELTA_BINARY_PACKED");
+                    }
+
+                    // Apply deltas and compute cumulative values
+                    for (int j = 0; j < decoded; ++j) {
+                        uint64_t delta = delta_buffer[j] + _min_delta;
+                        _last_value += delta;
+                        out[i] = _last_value;
+                        ++i;
+                    }
+                    _values_current_mini_block -= decoded;
+                    _values_remaining -= decoded;
+                    deltas_to_decode -= decoded;
+                }
+            } else if (deltas_to_decode > 0 && _delta_bit_width == 0) {
+                // Special case: bit width 0 means all deltas are equal to min_delta
+                for (size_t j = 0; j < deltas_to_decode; ++j) {
+                    _last_value += _min_delta;
+                    out[i] = _last_value;
+                    ++i;
+                }
+                _values_current_mini_block -= deltas_to_decode;
+                _values_remaining -= deltas_to_decode;
             }
-            delta += _min_delta;
-            _last_value += delta;
-            --_values_current_mini_block;
+
+            if (_values_remaining == 0) {
+                eat_final_padding();
+                break;
+            }
         }
         return i;
     }
@@ -374,16 +410,27 @@ class byte_stream_split_decoder final : public decoder<ParquetType>
     using typename decoder<ParquetType>::output_type;
     size_t read_batch(size_t n, output_type out[]) override {
         n = std::min(n, _total_values - _current_idx);
+        if (n == 0) {
+            return 0;
+        }
 
         byte* out_bytes = reinterpret_cast<byte*>(out);
-        for (size_t i = 0; i < n; ++i) {
-            for (size_t k = 0; k < sizeof(output_type); ++k) {
-                size_t out_byte_idx = k + i * sizeof(output_type);
-                size_t in_byte_idx = _current_idx + k * _total_values;
-                out_bytes[out_byte_idx] = _data[in_byte_idx];
-            }
-            ++_current_idx;
+        constexpr size_t kNumStreams = sizeof(output_type);
+
+        // Pre-calculate stream base pointers for better cache locality
+        const byte* streams[kNumStreams];
+        for (size_t k = 0; k < kNumStreams; ++k) {
+            streams[k] = _data.data() + _current_idx + k * _total_values;
         }
+
+        // Process values using pre-calculated stream pointers
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t k = 0; k < kNumStreams; ++k) {
+                out_bytes[k] = streams[k][i];
+            }
+            out_bytes += kNumStreams;
+        }
+        _current_idx += n;
         return n;
     }
     void reset(bytes_view data) override {

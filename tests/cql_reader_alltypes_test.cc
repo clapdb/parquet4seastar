@@ -102,7 +102,7 @@ SEASTAR_TEST_CASE(parquet_to_cql) {
             ss << '\n';
             auto file = seastar::open_file_dma(path + filename, seastar::open_flags::ro).get();
             auto file_ptr = std::make_unique<SeastarFile>(SeastarFile(file));
-            auto reader = file_reader::open(std::move(file_ptr)).get0();
+            auto reader = file_reader::open(std::move(file_ptr)).get();
             cql::parquet_to_cql(reader, "parquet", "row_number", ss).get();
             BOOST_CHECK_EQUAL(ss.str(), output);
         }

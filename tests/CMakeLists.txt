@@ -123,3 +123,15 @@ seastar_add_test(delta_byte_array
 
 seastar_add_test(byte_stream_split
         SOURCES byte_stream_split_test.cc)
+
+seastar_add_test(plain_encoding
+        SOURCES plain_encoding_test.cc)
+
+seastar_add_test(bpacking
+        SOURCES bpacking_test.cc)
+
+seastar_add_test(column_chunk_reader
+        SOURCES column_chunk_reader_test.cc)
+
+seastar_add_test(record_reader
+        SOURCES record_reader_test.cc)

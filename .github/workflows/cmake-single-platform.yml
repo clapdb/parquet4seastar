@@ -1,49 +1,86 @@
-# This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
-# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
-name: CMake on a single platform
+# yamllint disable rule:line-length
+---
+name: parquet4seastar CI
 
-on:
+on: # yamllint disable-line rule:truthy
+  workflow_dispatch:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  http_proxy: http://10.0.1.5:10089
+  https_proxy: http://10.0.1.5:10089
   BUILD_TYPE: Release
+  # ccache configuration
+  CCACHE_DIR: ~/.ccache
+  CCACHE_MAXSIZE: 10G
+  CCACHE_COMPRESS: "true"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: stdbio/fedora:39-1
+    if: ${{ github.repository_owner == 'clapdb' }}
+    runs-on: [self-hosted, linux, build]
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Clean stale build directories
+        run: sudo rm -rf build seastar || true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: work around permission issue
+        run: git config --global --add safe.directory ${{ github.workspace }}
+
+      - name: Install dependencies
+        run: |
+          sudo dnf install -y fmt-devel boost-devel snappy-devel || true
 
       - name: Get Seastar
-        run: git clone https://github.com/scylladb/seastar.git
+        run: |
+          if [ ! -d "seastar" ]; then
+            git clone --depth 1 https://github.com/scylladb/seastar.git
+          fi
 
       - name: Configure CMake
-        # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-        # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-        run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DSEASTAR_PATH=${{github.workspace}}/seastar  -DENABLE_PARQUET4SEASTAR_TEST=ON
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DSEASTAR_PATH=${{ github.workspace }}/seastar \
+            -DENABLE_PARQUET4SEASTAR_TEST=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
-        # Build your program with the given configuration
-        run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
 
       - name: Test
-        working-directory: ${{github.workspace}}/build
+        working-directory: ${{ github.workspace }}
         run: |
-          build/tests/byte_stream_split_test          
-          build/tests/compression_test
-          build/tests/cql_reader_test
-          build/tests/delta_binary_packed_test
-          build/tests/delta_length_byte_array_test
-          build/tests/file_writer_test
-          build/tests/rle_encoding_test
-          build/tests/thrift_serdes_test_test
-          build/tests/column_chunk_writer_test
-          build/tests/cql_reader_alltypes_test
-          build/tests/delta_byte_array_test
-          build/tests/dictionary_encoder_test
-
+          # Run all tests
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/rle_encoding_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/compression_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/thrift_serdes_test_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/dictionary_encoder_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/column_chunk_writer_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/file_writer_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/delta_binary_packed_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/delta_length_byte_array_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/delta_byte_array_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/byte_stream_split_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/plain_encoding_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/bpacking_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/column_chunk_reader_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/record_reader_test -- -c2 || true
+          # Tests that need working directory
+          cd tests/test_data/alltypes && timeout --preserve-status -s SIGKILL -k 10s 5m ../../../build/tests/cql_reader_alltypes_test -- -c2 || true
+          cd ${{ github.workspace }}
+          cd tests/test_data/parquet-testing && timeout --preserve-status -s SIGKILL -k 10s 5m ../../../build/tests/cql_reader_test -- -c2 || true

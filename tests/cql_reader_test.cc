@@ -234,7 +234,7 @@ INSERT INTO "parquet"("row_number", "mycol") VALUES(0, null);
                                                                            "Error", hint);
                                        return make_exception_future<file_reader>(parquet_exception(error));
                                    })
-                                   .get0();
+                                   .get();
             cql::parquet_to_cql(reader, "parquet", "row_number", ss).get();
             BOOST_CHECK_EQUAL(ss.str(), output);
         }
