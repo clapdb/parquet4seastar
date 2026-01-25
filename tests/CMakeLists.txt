@@ -135,3 +135,6 @@ seastar_add_test(column_chunk_reader
 
 seastar_add_test(record_reader
         SOURCES record_reader_test.cc)
+
+seastar_add_test(encoding_optimization
+        SOURCES encoding_optimization_test.cc)
