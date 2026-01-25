@@ -380,33 +380,46 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
         delta_length_byte_array_decoder _suffix_decoder;
 
         _len_decoder.reset(data);
-        size_t lengths_read = 0;
+        _lengths.clear();
+        // Pre-allocate estimated capacity to reduce reallocations
+        // Most pages have 1000-10000 values, start with 4x BATCH_SIZE
+        _lengths.reserve(BATCH_SIZE * 4);
+
+        int32_t batch_buffer[BATCH_SIZE];
         while (true) {
-            _lengths.resize(lengths_read + BATCH_SIZE);
-            int32_t* output = _lengths.data() + _lengths.size() - BATCH_SIZE;
-            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, batch_buffer);
             if (n_read == 0) {
                 break;
             }
-            lengths_read += n_read;
+            // Ensure capacity with exponential growth before inserting
+            if (_lengths.size() + n_read > _lengths.capacity()) {
+                _lengths.reserve(std::max(_lengths.capacity() * 2, _lengths.size() + n_read));
+            }
+            _lengths.insert(_lengths.end(), batch_buffer, batch_buffer + n_read);
         }
-        _lengths.resize(lengths_read);
 
         size_t len_bytes = data.size() - _len_decoder.bytes_left();
         data.remove_prefix(len_bytes);
 
         _suffix_decoder.reset(data);
-        size_t suffixes_read = 0;
+        _suffixes.clear();
+        // Pre-allocate for suffixes (same size as lengths)
+        _suffixes.reserve(_lengths.size());
+
+        tb batch_buffer_tb[BATCH_SIZE];
         while (true) {
-            _suffixes.resize(suffixes_read + BATCH_SIZE);
-            tb* output = _suffixes.data() + _suffixes.size() - BATCH_SIZE;
-            size_t n_read = _suffix_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _suffix_decoder.read_batch(BATCH_SIZE, batch_buffer_tb);
             if (n_read == 0) {
                 break;
             }
-            suffixes_read += n_read;
+            // Ensure capacity with exponential growth
+            if (_suffixes.size() + n_read > _suffixes.capacity()) {
+                _suffixes.reserve(std::max(_suffixes.capacity() * 2, _suffixes.size() + n_read));
+            }
+            _suffixes.insert(_suffixes.end(),
+                            std::make_move_iterator(batch_buffer_tb),
+                            std::make_move_iterator(batch_buffer_tb + n_read));
         }
-        _suffixes.resize(suffixes_read);
 
         _current_idx = 0;
     }
@@ -549,7 +562,9 @@ void dict_decoder<ParquetType>::reset(bytes_view data) {
 
 template <format::Type::type ParquetType>
 size_t dict_decoder<ParquetType>::read_batch(size_t n, output_type out[]) {
-    uint32_t buf[256];
+    // Increased buffer from 256 to 1024 for better throughput
+    // Reduces loop iterations and amortizes validation/lookup overhead
+    uint32_t buf[1024];
     size_t completed = 0;
     while (completed < n) {
         size_t n_to_read = std::min(n - completed, std::size(buf));
@@ -1046,6 +1061,8 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
             _first_value = data[0];
             _last_value = _first_value;
             i = 1;
+            // Reserve capacity for one block to avoid reallocations
+            _unencoded_values.reserve(BLOCK_VALUES);
         }
 
         for (; i < size; ++i) {

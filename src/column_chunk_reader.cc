@@ -55,6 +55,12 @@ bytes_view column_chunk_reader<T>::decompress(bytes_view compressed, size_t unco
     if (_decompressor->type() == format::CompressionCodec::UNCOMPRESSED) {
         return compressed;
     } else {
+        // Reserve extra capacity to reduce reallocation frequency across pages
+        // Use 1.5x growth factor with minimum 64KB over-allocation
+        if (uncompressed_size > _decompression_buffer.capacity()) {
+            size_t new_capacity = std::max(uncompressed_size * 3 / 2, uncompressed_size + 65536);
+            _decompression_buffer.reserve(new_capacity);
+        }
         _decompression_buffer.resize(uncompressed_size);
         _decompression_buffer = _decompressor->decompress(compressed, std::move(_decompression_buffer));
         return _decompression_buffer;
