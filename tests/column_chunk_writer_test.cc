@@ -45,10 +45,10 @@ SEASTAR_TEST_CASE(column_roundtrip) {
         seastar::file output_file =
           seastar::open_file_dma(test_file_name.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
         // Write
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();  // FIXME
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();  // FIXME
         constexpr format::Type::type FLBA = format::Type::FIXED_LEN_BYTE_ARRAY;
         column_chunk_writer<FLBA> w{1, 1, make_value_encoder<FLBA>(format::Encoding::RLE_DICTIONARY),
                                     compressor::make(format::CompressionCodec::SNAPPY)};
@@ -59,14 +59,14 @@ SEASTAR_TEST_CASE(column_roundtrip) {
         w.put(1, 1, "a"_bv);
         w.put(0, 1, "d"_bv);
         w.put(1, 1, "e"_bv);
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         BOOST_CHECK_EQUAL(cmd->num_values, 6);
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file_name.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file_name.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<format::Type::FIXED_LEN_BYTE_ARRAY> r{
           page_reader{SeastarFile(input_file).make_peekable_stream()}, format::CompressionCodec::SNAPPY, 1, 1,
@@ -86,7 +86,7 @@ SEASTAR_TEST_CASE(column_roundtrip) {
         int32_t* repp = rep;
         seastar::temporary_buffer<uint8_t>* valp = val;
         size_t n_to_read = n_levels;
-        while (size_t n_read = r.read_batch(n_to_read, defp, repp, valp).get0()) {
+        while (size_t n_read = r.read_batch(n_to_read, defp, repp, valp).get()) {
             for (size_t i = 0; i < n_read; ++i) {
                 if (defp[i] == 1) {
                     ++valp;

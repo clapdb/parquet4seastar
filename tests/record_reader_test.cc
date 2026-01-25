@@ -137,26 +137,26 @@ SEASTAR_TEST_CASE(read_primitive_field) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& int_field = fw->column<format::Type::INT32>(0);
         int_field.put(0, 0, 42);
         int_field.put(0, 0, 100);
         int_field.put(0, 0, -1);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Verify the events
         BOOST_CHECK_GE(consumer.events.size(), 3u);
@@ -199,9 +199,9 @@ SEASTAR_TEST_CASE(read_optional_field) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& opt_int = fw->column<format::Type::INT32>(0);
         opt_int.put(1, 0, 10);    // non-null value
@@ -211,17 +211,17 @@ SEASTAR_TEST_CASE(read_optional_field) {
         opt_int.put(0, 0, 0);     // null
         opt_int.put(1, 0, 30);    // non-null value
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Count nulls and values
         int null_count = 0;
@@ -265,9 +265,9 @@ SEASTAR_TEST_CASE(read_struct_field) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& field_a = fw->column<format::Type::INT32>(0);
         auto& field_b = fw->column<format::Type::INT64>(1);
@@ -279,17 +279,17 @@ SEASTAR_TEST_CASE(read_struct_field) {
         field_a.put(0, 0, 2);
         field_b.put(0, 0, 200);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Verify struct events
         int start_struct_count = 0;
@@ -327,9 +327,9 @@ SEASTAR_TEST_CASE(read_list_field) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& list_item = fw->column<format::Type::INT32>(0);
 
@@ -342,17 +342,17 @@ SEASTAR_TEST_CASE(read_list_field) {
         list_item.put(2, 0, 10);  // rep=0 starts new record
         list_item.put(2, 1, 20);  // rep=1 continues list
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Verify list events
         int start_list_count = 0;
@@ -402,9 +402,9 @@ SEASTAR_TEST_CASE(read_map_field) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& map_key = fw->column<format::Type::BYTE_ARRAY>(0);
         auto& map_value = fw->column<format::Type::INT32>(1);
@@ -419,17 +419,17 @@ SEASTAR_TEST_CASE(read_map_field) {
         map_key.put(2, 0, "x"_bv);
         map_value.put(2, 0, 100);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Verify map events
         int start_map_count = 0;
@@ -480,9 +480,9 @@ SEASTAR_TEST_CASE(read_nested_structure) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& x = fw->column<format::Type::INT32>(0);
         auto& y = fw->column<format::Type::INT32>(1);
@@ -493,17 +493,17 @@ SEASTAR_TEST_CASE(read_nested_structure) {
         x.put(4, 1, 3);
         y.put(4, 1, 4);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_all(consumer).get0();
+        rr.read_all(consumer).get();
 
         // Verify nested structure events
         int start_list_count = 0;
@@ -538,24 +538,24 @@ SEASTAR_TEST_CASE(consumer_event_sequence) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& value = fw->column<format::Type::INT32>(0);
         value.put(0, 0, 999);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
-        auto rr = record::record_reader::make(fr, 0).get0();
+        auto rr = record::record_reader::make(fr, 0).get();
 
         test_consumer consumer;
-        rr.read_one(consumer).get0();
+        rr.read_one(consumer).get();
 
         // Verify event sequence
         BOOST_REQUIRE(!consumer.events.empty());
@@ -590,37 +590,37 @@ SEASTAR_TEST_CASE(read_multiple_row_groups) {
 
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = seastar::open_file_dma(test_file, flags).get0();
-        auto sink = seastar::make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
 
         auto& value = fw->column<format::Type::INT32>(0);
 
         // First row group
         value.put(0, 0, 1);
         value.put(0, 0, 2);
-        fw->flush_row_group().get0();
+        fw->flush_row_group().get();
 
         // Second row group
         value.put(0, 0, 3);
         value.put(0, 0, 4);
 
-        fw->close().get0();
+        fw->close().get();
 
         // Read both row groups
-        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get0();
+        auto read_file = seastar::open_file_dma(test_file, seastar::open_flags::ro).get();
         std::unique_ptr<IReader> file_ptr = std::make_unique<SeastarFile>(SeastarFile(read_file));
-        auto fr = file_reader::open(std::move(file_ptr)).get0();
+        auto fr = file_reader::open(std::move(file_ptr)).get();
 
         // Read row group 0
-        auto rr0 = record::record_reader::make(fr, 0).get0();
+        auto rr0 = record::record_reader::make(fr, 0).get();
         test_consumer consumer0;
-        rr0.read_all(consumer0).get0();
+        rr0.read_all(consumer0).get();
 
         // Read row group 1
-        auto rr1 = record::record_reader::make(fr, 1).get0();
+        auto rr1 = record::record_reader::make(fr, 1).get();
         test_consumer consumer1;
-        rr1.read_all(consumer1).get0();
+        rr1.read_all(consumer1).get();
 
         // Verify both row groups have records
         int rg0_values = 0;

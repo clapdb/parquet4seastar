@@ -106,9 +106,9 @@ SEASTAR_TEST_CASE(full_roundtrip) {
         }();
         seastar::open_flags flags =
           seastar::open_flags::wo | seastar::open_flags::create | seastar::open_flags::truncate;
-        auto file = open_file_dma(test_file_name, flags).get0();
-        auto sink = make_file_output_stream(file).get0();
-        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get0();
+        auto file = seastar::open_file_dma(test_file_name, flags).get();
+        auto sink = seastar::make_file_output_stream(file).get();
+        auto fw = writer<seastar::output_stream<char>>::open(std::move(sink), writer_schema).get();
         auto memory_fw = sync_writer<MemorySink>::open(MemorySink(), writer_schema);
         {
             auto& map_key = fw->column<format::Type::BYTE_ARRAY>(0);
@@ -121,7 +121,7 @@ SEASTAR_TEST_CASE(full_roundtrip) {
             struct_field_1.put(0, 0, 1337);
             struct_field_2.put(0, 0, 1337);
 
-            fw->flush_row_group().get0();
+            fw->flush_row_group().get();
 
             map_key.put(2, 0, "key1"_bv);
             map_value.put(2, 0, 1);
@@ -155,12 +155,12 @@ SEASTAR_TEST_CASE(full_roundtrip) {
             struct_field_2.put(3, 1, 1);
         }
 
-        fw->close().get0();
+        fw->close().get();
         memory_fw->close();
 
-        auto parquet_file = seastar::open_file_dma(test_file_name, seastar::open_flags::ro).get0();
+        auto parquet_file = seastar::open_file_dma(test_file_name, seastar::open_flags::ro).get();
         auto size = parquet_file.size().get();
-        auto buffer = parquet_file.dma_read<char>(0, size).get();
+        auto buffer = parquet_file.dma_read_bulk<char>(0, size).get();
         BOOST_CHECK_EQUAL(std::vector<char>(buffer.begin(), buffer.end()), memory_fw->fetch_sink().data);
 
         // Read

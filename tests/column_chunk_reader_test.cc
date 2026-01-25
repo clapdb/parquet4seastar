@@ -48,11 +48,11 @@ SEASTAR_TEST_CASE(read_all_null_column) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
         // Write - max def level is 1, rep level is 0
         // def_level=0 means null, def_level=1 means non-null
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{1, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -61,14 +61,14 @@ SEASTAR_TEST_CASE(read_all_null_column) {
         for (int i = 0; i < 10; ++i) {
             w.put(0, 0, 0);  // def=0 means null, value is ignored
         }
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         BOOST_CHECK_EQUAL(cmd->num_values, 10);
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 1, 0, std::nullopt};
@@ -78,7 +78,7 @@ SEASTAR_TEST_CASE(read_all_null_column) {
         int32_t rep[n_levels];
         int32_t val[n_levels];
 
-        size_t n_read = r.read_batch(n_levels, def, rep, val).get0();
+        size_t n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, n_levels);
 
         // All def levels should be 0 (null)
@@ -88,7 +88,7 @@ SEASTAR_TEST_CASE(read_all_null_column) {
         }
 
         // No more data
-        n_read = r.read_batch(n_levels, def, rep, val).get0();
+        n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, 0u);
     });
 }
@@ -100,9 +100,9 @@ SEASTAR_TEST_CASE(read_all_non_null_column) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{1, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -113,14 +113,14 @@ SEASTAR_TEST_CASE(read_all_non_null_column) {
             expected_values.push_back(i * 100);
             w.put(1, 0, i * 100);
         }
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         BOOST_CHECK_EQUAL(cmd->num_values, 10);
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 1, 0, std::nullopt};
@@ -130,7 +130,7 @@ SEASTAR_TEST_CASE(read_all_non_null_column) {
         int32_t rep[n_levels];
         int32_t val[n_levels];
 
-        size_t n_read = r.read_batch(n_levels, def, rep, val).get0();
+        size_t n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, n_levels);
 
         // All def levels should be 1 (non-null)
@@ -149,9 +149,9 @@ SEASTAR_TEST_CASE(read_mixed_null_column) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{1, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -163,14 +163,14 @@ SEASTAR_TEST_CASE(read_mixed_null_column) {
         w.put(1, 0, 300);  // non-null
         w.put(0, 0, 0);    // null
 
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         BOOST_CHECK_EQUAL(cmd->num_values, 5);
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 1, 0, std::nullopt};
@@ -180,7 +180,7 @@ SEASTAR_TEST_CASE(read_mixed_null_column) {
         int32_t rep[n_levels];
         int32_t val[3];  // Only 3 non-null values
 
-        size_t n_read = r.read_batch(n_levels, def, rep, val).get0();
+        size_t n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, n_levels);
 
         // Check def levels
@@ -200,9 +200,9 @@ SEASTAR_TEST_CASE(read_simple_list) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         // def_level=2 (list exists + element exists), rep_level=1 (list item repetition)
         column_chunk_writer<INT32> w{2, 1, make_value_encoder<INT32>(format::Encoding::PLAIN),
@@ -217,14 +217,14 @@ SEASTAR_TEST_CASE(read_simple_list) {
         w.put(2, 0, 10);  // rep=0 starts new record
         w.put(2, 1, 20);  // rep=1 continues list
 
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         BOOST_CHECK_EQUAL(cmd->num_values, 5);
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 2, 1, std::nullopt};
@@ -234,7 +234,7 @@ SEASTAR_TEST_CASE(read_simple_list) {
         int32_t rep[n_levels];
         int32_t val[n_levels];
 
-        size_t n_read = r.read_batch(n_levels, def, rep, val).get0();
+        size_t n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, n_levels);
 
         int32_t expected_def[] = {2, 2, 2, 2, 2};
@@ -254,9 +254,9 @@ SEASTAR_TEST_CASE(read_nested_optional) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         // Nested optional: optional<optional<int>>
         // def_level: 0=outer null, 1=inner null, 2=value exists
@@ -268,12 +268,12 @@ SEASTAR_TEST_CASE(read_nested_optional) {
         w.put(0, 0, 0);    // Outer null
         w.put(2, 0, 100);  // Both present, value=100
 
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 2, 0, std::nullopt};
@@ -283,7 +283,7 @@ SEASTAR_TEST_CASE(read_nested_optional) {
         int32_t rep[n_levels];
         int32_t val[2];  // Only 2 non-null values
 
-        size_t n_read = r.read_batch(n_levels, def, rep, val).get0();
+        size_t n_read = r.read_batch(n_levels, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, n_levels);
 
         int32_t expected_def[] = {2, 1, 0, 2};
@@ -301,9 +301,9 @@ SEASTAR_TEST_CASE(read_batch_boundary) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{0, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -314,12 +314,12 @@ SEASTAR_TEST_CASE(read_batch_boundary) {
             expected_values.push_back(i);
             w.put(0, 0, i);
         }
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         // Read in small batches
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 0, 0, std::nullopt};
@@ -330,7 +330,7 @@ SEASTAR_TEST_CASE(read_batch_boundary) {
         int32_t val[10];
 
         while (true) {
-            size_t n_read = r.read_batch(10, def, rep, val).get0();
+            size_t n_read = r.read_batch(10, def, rep, val).get();
             if (n_read == 0) {
                 break;
             }
@@ -352,9 +352,9 @@ SEASTAR_TEST_CASE(read_multiple_pages) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{0, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -380,12 +380,12 @@ SEASTAR_TEST_CASE(read_multiple_pages) {
             w.put(0, 0, i);
         }
 
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         // Read all at once
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 0, 0, std::nullopt};
@@ -396,7 +396,7 @@ SEASTAR_TEST_CASE(read_multiple_pages) {
         int32_t val[200];
 
         while (true) {
-            size_t n_read = r.read_batch(200, def, rep, val).get0();
+            size_t n_read = r.read_batch(200, def, rep, val).get();
             if (n_read == 0) {
                 break;
             }
@@ -418,9 +418,9 @@ SEASTAR_TEST_CASE(read_with_compression) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{0, 0, make_value_encoder<INT32>(format::Encoding::PLAIN),
                                      compressor::make(format::CompressionCodec::SNAPPY)};
@@ -430,12 +430,12 @@ SEASTAR_TEST_CASE(read_with_compression) {
             expected_values.push_back(i * 7);
             w.put(0, 0, i * 7);
         }
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::SNAPPY, 0, 0, std::nullopt};
@@ -446,7 +446,7 @@ SEASTAR_TEST_CASE(read_with_compression) {
         int32_t val[1000];
 
         while (true) {
-            size_t n_read = r.read_batch(1000, def, rep, val).get0();
+            size_t n_read = r.read_batch(1000, def, rep, val).get();
             if (n_read == 0) {
                 break;
             }
@@ -468,9 +468,9 @@ SEASTAR_TEST_CASE(read_dictionary_encoded) {
         seastar::file output_file =
           seastar::open_file_dma(test_file.data(),
                                  seastar::open_flags::wo | seastar::open_flags::truncate | seastar::open_flags::create)
-            .get0();
+            .get();
 
-        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get0();
+        seastar::output_stream<char> output = seastar::make_file_output_stream(output_file).get();
         constexpr format::Type::type INT32 = format::Type::INT32;
         column_chunk_writer<INT32> w{0, 0, make_value_encoder<INT32>(format::Encoding::RLE_DICTIONARY),
                                      compressor::make(format::CompressionCodec::UNCOMPRESSED)};
@@ -480,12 +480,12 @@ SEASTAR_TEST_CASE(read_dictionary_encoded) {
         for (auto v : expected_values) {
             w.put(0, 0, v);
         }
-        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get0();
+        seastar::lw_shared_ptr<format::ColumnMetaData> cmd = w.flush_chunk(output).get();
         output.flush().get();
         output.close().get();
 
         // Read
-        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get0();
+        seastar::file input_file = seastar::open_file_dma(test_file.data(), seastar::open_flags::ro).get();
 
         column_chunk_reader<INT32> r{page_reader{SeastarFile(input_file).make_peekable_stream()},
                                      format::CompressionCodec::UNCOMPRESSED, 0, 0, std::nullopt};
@@ -494,7 +494,7 @@ SEASTAR_TEST_CASE(read_dictionary_encoded) {
         int32_t rep[10];
         int32_t val[10];
 
-        size_t n_read = r.read_batch(10, def, rep, val).get0();
+        size_t n_read = r.read_batch(10, def, rep, val).get();
         BOOST_CHECK_EQUAL(n_read, 10u);
 
         std::vector<int32_t> decoded(val, val + n_read);
