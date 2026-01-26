@@ -30,6 +30,37 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(Snappy REQUIRED)
 find_package(ZLIB REQUIRED)
 
+# Optional compression libraries - can be provided by parent project
+option(PARQUET4SEASTAR_WITH_ZSTD "Enable ZSTD compression support" OFF)
+option(PARQUET4SEASTAR_WITH_LZ4 "Enable LZ4 compression support" OFF)
+
+if (PARQUET4SEASTAR_WITH_ZSTD)
+    # Check if zstd target already exists (provided by parent project)
+    if (NOT TARGET zstd)
+        find_package(zstd QUIET)
+    endif()
+    if (TARGET zstd OR zstd_FOUND)
+        message(STATUS "parquet4seastar: ZSTD compression enabled")
+    else()
+        message(WARNING "parquet4seastar: ZSTD requested but not found, disabling")
+        set(PARQUET4SEASTAR_WITH_ZSTD OFF)
+    endif()
+endif()
+
+if (PARQUET4SEASTAR_WITH_LZ4)
+    # Check if LZ4 is already available
+    find_package(PkgConfig QUIET)
+    if (PkgConfig_FOUND)
+        pkg_check_modules(LZ4 QUIET liblz4)
+    endif()
+    if (LZ4_FOUND)
+        message(STATUS "parquet4seastar: LZ4 compression enabled")
+    else()
+        message(WARNING "parquet4seastar: LZ4 requested but not found, disabling")
+        set(PARQUET4SEASTAR_WITH_LZ4 OFF)
+    endif()
+endif()
+
 set(MIN_Thrift_VERSION 0.11.0)
 find_package(Thrift ${MIN_Thrift_VERSION} REQUIRED)
 
@@ -80,6 +111,19 @@ target_link_libraries(parquet4seastar
         ZLIB::ZLIB
         Snappy::snappy
 )
+
+# Conditionally link ZSTD
+if (PARQUET4SEASTAR_WITH_ZSTD)
+    target_link_libraries(parquet4seastar zstd)
+    target_compile_definitions(parquet4seastar PRIVATE PARQUET4SEASTAR_WITH_ZSTD)
+endif()
+
+# Conditionally link LZ4
+if (PARQUET4SEASTAR_WITH_LZ4)
+    target_link_libraries(parquet4seastar ${LZ4_LIBRARIES})
+    target_include_directories(parquet4seastar PRIVATE ${LZ4_INCLUDE_DIRS})
+    target_compile_definitions(parquet4seastar PRIVATE PARQUET4SEASTAR_WITH_LZ4)
+endif()
 
 target_include_directories(parquet4seastar
         PUBLIC

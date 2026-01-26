@@ -80,6 +80,7 @@ jobs:
           timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/bpacking_test -- -c2 || true
           timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/column_chunk_reader_test -- -c2 || true
           timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/record_reader_test -- -c2 || true
+          timeout --preserve-status -s SIGKILL -k 10s 5m build/tests/encoding_optimization_test -- -c2 || true
           # Tests that need working directory
           cd tests/test_data/alltypes && timeout --preserve-status -s SIGKILL -k 10s 5m ../../../build/tests/cql_reader_alltypes_test -- -c2 || true
           cd ${{ github.workspace }}

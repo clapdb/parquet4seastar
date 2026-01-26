@@ -173,6 +173,14 @@ class delta_binary_packed_decoder final : public decoder<ParquetType>
             }
         }
         _mini_block_idx = 0;
+
+        // Prefetch bit widths for next few miniblocks to reduce cache misses
+        if (_num_mini_blocks > 0) {
+            __builtin_prefetch(_delta_bit_widths.data(), 0, 3);
+        }
+        if (_num_mini_blocks > 1) {
+            __builtin_prefetch(_delta_bit_widths.data() + 1, 0, 2);
+        }
     }
 
    public:
@@ -303,7 +311,7 @@ class delta_length_byte_array_decoder final : public decoder<format::Type::BYTE_
         n = std::min(n, _lengths.size() - _current_idx);
         for (size_t i = 0; i < n; ++i) {
             uint32_t len = _lengths[_current_idx];
-            if (len > _values.size()) {
+            if (__builtin_expect(len > _values.size(), false)) {
                 throw parquet_exception("Unexpected end of values in DELTA_LENGTH_BYTE_ARRAY");
             }
             out[i] = _values.share(0, len);
@@ -316,17 +324,24 @@ class delta_length_byte_array_decoder final : public decoder<format::Type::BYTE_
         delta_binary_packed_decoder<format::Type::INT32> _len_decoder;
         _len_decoder.reset(data);
 
-        size_t lengths_read = 0;
+        _lengths.clear();
+        // Reuse existing capacity if sufficient, otherwise pre-allocate
+        if (_lengths.capacity() < BATCH_SIZE * 4) {
+            _lengths.reserve(BATCH_SIZE * 4);
+        }
+
+        int32_t batch_buffer[BATCH_SIZE];
         while (true) {
-            _lengths.resize(lengths_read + BATCH_SIZE);
-            int32_t* output = _lengths.data() + _lengths.size() - BATCH_SIZE;
-            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, batch_buffer);
             if (n_read == 0) {
                 break;
             }
-            lengths_read += n_read;
+            // Ensure capacity before inserting
+            if (_lengths.size() + n_read > _lengths.capacity()) {
+                _lengths.reserve(_lengths.capacity() * 2);
+            }
+            _lengths.insert(_lengths.end(), batch_buffer, batch_buffer + n_read);
         }
-        _lengths.resize(lengths_read);
 
         size_t len_bytes = data.size() - _len_decoder.bytes_left();
         data.remove_prefix(len_bytes);
@@ -351,12 +366,23 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
         for (size_t i = 0; i < n; ++i) {
             uint32_t prefix_len = _lengths[i];
             const tb& suffix = _suffixes[i];
-            if (prefix_len > _last_string.size()) {
+            if (__builtin_expect(prefix_len > _last_string.size(), false)) {
                 throw parquet_exception("Invalid prefix length in DELTA_BYTE_ARRAY");
             }
             out[i] = tb(prefix_len + suffix.size());
-            std::copy_n(_last_string.begin(), prefix_len, out[i].get_write());
-            std::copy(suffix.begin(), suffix.end(), out[i].get_write() + prefix_len);
+            if (prefix_len > 0) {
+                std::memcpy(out[i].get_write(), _last_string.data(), prefix_len);
+            }
+            if (suffix.size() > 0) {
+                std::memcpy(out[i].get_write() + prefix_len, suffix.get(), suffix.size());
+            }
+
+            // Resize to prefix length, then append suffix
+            // Reserve capacity to avoid reallocation when strings grow
+            size_t new_size = prefix_len + suffix.size();
+            if (new_size > _last_string.capacity()) {
+                _last_string.reserve(new_size * 3 / 2);  // 1.5x growth
+            }
             _last_string.resize(prefix_len);
             _last_string.insert(_last_string.end(), suffix.begin(), suffix.end());
         }
@@ -367,33 +393,48 @@ class delta_byte_array_decoder final : public decoder<format::Type::BYTE_ARRAY>
         delta_length_byte_array_decoder _suffix_decoder;
 
         _len_decoder.reset(data);
-        size_t lengths_read = 0;
+        _lengths.clear();
+        // Reuse existing capacity if sufficient, otherwise pre-allocate
+        // Most pages have 1000-10000 values, start with 4x BATCH_SIZE
+        if (_lengths.capacity() < BATCH_SIZE * 4) {
+            _lengths.reserve(BATCH_SIZE * 4);
+        }
+
+        int32_t batch_buffer[BATCH_SIZE];
         while (true) {
-            _lengths.resize(lengths_read + BATCH_SIZE);
-            int32_t* output = _lengths.data() + _lengths.size() - BATCH_SIZE;
-            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _len_decoder.read_batch(BATCH_SIZE, batch_buffer);
             if (n_read == 0) {
                 break;
             }
-            lengths_read += n_read;
+            // Ensure capacity with exponential growth before inserting
+            if (_lengths.size() + n_read > _lengths.capacity()) {
+                _lengths.reserve(std::max(_lengths.capacity() * 2, _lengths.size() + n_read));
+            }
+            _lengths.insert(_lengths.end(), batch_buffer, batch_buffer + n_read);
         }
-        _lengths.resize(lengths_read);
 
         size_t len_bytes = data.size() - _len_decoder.bytes_left();
         data.remove_prefix(len_bytes);
 
         _suffix_decoder.reset(data);
-        size_t suffixes_read = 0;
+        _suffixes.clear();
+        // Pre-allocate for suffixes (same size as lengths)
+        _suffixes.reserve(_lengths.size());
+
+        tb batch_buffer_tb[BATCH_SIZE];
         while (true) {
-            _suffixes.resize(suffixes_read + BATCH_SIZE);
-            tb* output = _suffixes.data() + _suffixes.size() - BATCH_SIZE;
-            size_t n_read = _suffix_decoder.read_batch(BATCH_SIZE, output);
+            size_t n_read = _suffix_decoder.read_batch(BATCH_SIZE, batch_buffer_tb);
             if (n_read == 0) {
                 break;
             }
-            suffixes_read += n_read;
+            // Ensure capacity with exponential growth
+            if (_suffixes.size() + n_read > _suffixes.capacity()) {
+                _suffixes.reserve(std::max(_suffixes.capacity() * 2, _suffixes.size() + n_read));
+            }
+            _suffixes.insert(_suffixes.end(),
+                            std::make_move_iterator(batch_buffer_tb),
+                            std::make_move_iterator(batch_buffer_tb + n_read));
         }
-        _suffixes.resize(suffixes_read);
 
         _current_idx = 0;
     }
@@ -424,7 +465,14 @@ class byte_stream_split_decoder final : public decoder<ParquetType>
         }
 
         // Process values using pre-calculated stream pointers
+        constexpr size_t PREFETCH_DISTANCE = 64; // Cache line prefetch ahead
         for (size_t i = 0; i < n; ++i) {
+            // Prefetch next cache line from each stream
+            if (i + PREFETCH_DISTANCE < n) {
+                for (size_t k = 0; k < kNumStreams; ++k) {
+                    __builtin_prefetch(&streams[k][i + PREFETCH_DISTANCE], 0, 3);
+                }
+            }
             for (size_t k = 0; k < kNumStreams; ++k) {
                 out_bytes[k] = streams[k][i];
             }
@@ -479,17 +527,17 @@ size_t plain_decoder_boolean::read_batch(size_t n, uint8_t out[]) { return _deco
 
 size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<uint8_t> out[]) {
     for (size_t i = 0; i < n; ++i) {
-        if (_buffer.size() == 0) {
+        if (__builtin_expect(_buffer.size() == 0, false)) {
             return i;
         }
-        if (_buffer.size() < 4) {
+        if (__builtin_expect(_buffer.size() < 4, false)) {
             throw parquet_exception::corrupted_file(
               seastar::format("End of page while reading BYTE_ARRAY length (needed {}B, got {}B)", 4, _buffer.size()));
         }
         uint32_t len;
         std::memcpy(&len, _buffer.get(), 4);
         _buffer.trim_front(4);
-        if (len > _buffer.size()) {
+        if (__builtin_expect(len > _buffer.size(), false)) {
             throw parquet_exception::corrupted_file(
               seastar::format("End of page while reading BYTE_ARRAY (needed {}B, got {}B)", len, _buffer.size()));
         }
@@ -501,10 +549,10 @@ size_t plain_decoder_byte_array::read_batch(size_t n, seastar::temporary_buffer<
 
 size_t plain_decoder_fixed_len_byte_array::read_batch(size_t n, seastar::temporary_buffer<uint8_t> out[]) {
     for (size_t i = 0; i < n; ++i) {
-        if (_buffer.size() == 0) {
+        if (__builtin_expect(_buffer.size() == 0, false)) {
             return i;
         }
-        if (_fixed_len > _buffer.size()) {
+        if (__builtin_expect(_fixed_len > _buffer.size(), false)) {
             throw parquet_exception::corrupted_file(seastar::format(
               "End of page while reading FIXED_LEN_BYTE_ARRAY (needed {}B, got {}B)", _fixed_len, _buffer.size()));
         }
@@ -529,24 +577,34 @@ void dict_decoder<ParquetType>::reset(bytes_view data) {
 
 template <format::Type::type ParquetType>
 size_t dict_decoder<ParquetType>::read_batch(size_t n, output_type out[]) {
-    uint32_t buf[256];
+    // Increased buffer from 256 to 1024 for better throughput
+    // Reduces loop iterations and amortizes validation/lookup overhead
+    uint32_t buf[1024];
     size_t completed = 0;
     while (completed < n) {
         size_t n_to_read = std::min(n - completed, std::size(buf));
         size_t n_read = _rle_decoder.GetBatch(std::data(buf), n_to_read);
+
+        // Batch validate all indices first (better branch prediction)
         for (size_t i = 0; i < n_read; ++i) {
-            if (buf[i] > _dict_size) {
+            if (__builtin_expect(buf[i] > _dict_size, false)) {
                 throw parquet_exception::corrupted_file(
                   seastar::format("Dict index exceeds dict size (dict size = {}, index = {})", _dict_size, buf[i]));
             }
-            if constexpr (std::is_trivially_copyable_v<output_type>) {
-                out[completed] = _dict[buf[i]];
-            } else {
-                // Why isn't seastar::temporary_buffer copyable though?
-                out[completed] = _dict[buf[i]].share();
-            }
-            ++completed;
         }
+
+        // Now perform dictionary lookups without bounds checking
+        if constexpr (std::is_trivially_copyable_v<output_type>) {
+            for (size_t i = 0; i < n_read; ++i) {
+                out[completed + i] = _dict[buf[i]];
+            }
+        } else {
+            for (size_t i = 0; i < n_read; ++i) {
+                out[completed + i] = _dict[buf[i]].share();
+            }
+        }
+        completed += n_read;
+
         if (n_read < n_to_read) {
             break;
         }
@@ -673,11 +731,16 @@ class plain_encoder : public value_encoder<ParquetType>
         size_t size = _buf.size() * sizeof(input_type);
         return {data, size};
     }
-    void put_batch(const input_type data[], size_t size) override { _buf.insert(_buf.end(), data, data + size); }
+    void put_batch(const input_type data[], size_t size) override {
+        _buf.reserve(_buf.size() + size);
+        _buf.insert(_buf.end(), data, data + size);
+    }
     size_t max_encoded_size() const override { return view().size(); }
     flush_result flush(byte sink[]) override {
         bytes_view v = view();
-        std::copy(v.begin(), v.end(), sink);
+        if (v.size() > 0) {
+            std::memcpy(sink, v.data(), v.size());
+        }
         _buf.clear();
         return {v.size(), format::Encoding::PLAIN};
     }
@@ -704,14 +767,24 @@ class plain_encoder<format::Type::BYTE_ARRAY> : public value_encoder<format::Typ
    public:
     bytes_view view() const { return {_buf.data(), _buf.size()}; }
     void put_batch(const input_type data[], size_t size) override {
+        // Pre-calculate total size needed: 4 bytes per length + all string data
+        size_t total_size = 0;
+        for (size_t i = 0; i < size; ++i) {
+            total_size += sizeof(uint32_t) + data[i].size();
+        }
+        // Reserve space to avoid repeated reallocations
+        _buf.reserve(_buf.size() + total_size);
+
         for (size_t i = 0; i < size; ++i) {
             put(data[i]);
         }
     }
     size_t max_encoded_size() const override { return _buf.size(); }
     flush_result flush(byte sink[]) override {
-        std::copy(_buf.begin(), _buf.end(), sink);
         size_t size = _buf.size();
+        if (size > 0) {
+            std::memcpy(sink, _buf.data(), size);
+        }
         _buf.clear();
         return {size, format::Encoding::PLAIN};
     }
@@ -735,14 +808,21 @@ class plain_encoder<format::Type::FIXED_LEN_BYTE_ARRAY> : public value_encoder<f
    public:
     bytes_view view() const { return {_buf.data(), _buf.size()}; }
     void put_batch(const input_type data[], size_t size) override {
+        // Pre-reserve space for all fixed-length values
+        if (size > 0) {
+            size_t total_size = data[0].size() * size;
+            _buf.reserve(_buf.size() + total_size);
+        }
         for (size_t i = 0; i < size; ++i) {
             put(data[i]);
         }
     }
     size_t max_encoded_size() const override { return _buf.size(); }
     flush_result flush(byte sink[]) override {
-        std::copy(_buf.begin(), _buf.end(), sink);
         size_t size = _buf.size();
+        if (size > 0) {
+            std::memcpy(sink, _buf.data(), size);
+        }
         _buf.clear();
         return {size, format::Encoding::PLAIN};
     }
@@ -761,6 +841,11 @@ class dict_builder
     plain_encoder<ParquetType> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        // Typical dictionary sizes: 100-10000 unique values
+        _accumulator.reserve(1024);
+    }
     uint32_t put(input_type key) {
         auto [iter, was_new_key] = _accumulator.try_emplace(key, _accumulator.size());
         if (was_new_key) {
@@ -780,6 +865,10 @@ class dict_builder<format::Type::BYTE_ARRAY>
     plain_encoder<format::Type::BYTE_ARRAY> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        _accumulator.reserve(1024);
+    }
     uint32_t put(bytes_view key) {
         auto [it, was_new_key] = _accumulator.try_emplace(bytes{key}, _accumulator.size());
         if (was_new_key) {
@@ -799,6 +888,10 @@ class dict_builder<format::Type::FIXED_LEN_BYTE_ARRAY>
     plain_encoder<format::Type::FIXED_LEN_BYTE_ARRAY> _dict;
 
    public:
+    dict_builder() {
+        // Pre-allocate hash table capacity to reduce rehashing
+        _accumulator.reserve(1024);
+    }
     uint32_t put(bytes_view key) {
         auto [it, was_new_key] = _accumulator.try_emplace(bytes{key}, _accumulator.size());
         if (was_new_key) {
@@ -940,23 +1033,26 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
         unsigned_type max_deltas[MINIBLOCKS_PER_BLOCK] = {};
         unsigned_type bit_widths[MINIBLOCKS_PER_BLOCK] = {};
 
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
+        // First pass: compute deltas and find min_delta simultaneously
+        signed_type min_delta = static_cast<signed_type>(
+            static_cast<unsigned_type>(_unencoded_values[0]) - static_cast<unsigned_type>(_last_value));
+        deltas[0] = static_cast<unsigned_type>(_unencoded_values[0]) - static_cast<unsigned_type>(_last_value);
+        _last_value = _unencoded_values[0];
+
+        for (size_t i = 1; i < _unencoded_values.size(); ++i) {
             deltas[i] = static_cast<unsigned_type>(_unencoded_values[i]) - static_cast<unsigned_type>(_last_value);
             _last_value = _unencoded_values[i];
-        }
-
-        signed_type min_delta = deltas[0];
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             // Implementation-defined behaviour!
             min_delta = std::min(min_delta, static_cast<signed_type>(deltas[i]));
         }
+
+        // Second pass: adjust deltas by min_delta and compute max_deltas per miniblock
         for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             deltas[i] = deltas[i] - static_cast<unsigned_type>(min_delta);
-        }
-        for (size_t i = 0; i < _unencoded_values.size(); ++i) {
             size_t miniblock = i / VALUES_PER_MINIBLOCK;
             max_deltas[miniblock] = std::max(max_deltas[miniblock], deltas[i]);
         }
+
         for (size_t mb = 0; mb < MINIBLOCKS_PER_BLOCK; ++mb) {
             bit_widths[mb] = bit_width(max_deltas[mb]);
         }
@@ -1002,6 +1098,8 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
             _first_value = data[0];
             _last_value = _first_value;
             i = 1;
+            // Reserve capacity for one block to avoid reallocations
+            _unencoded_values.reserve(BLOCK_VALUES);
         }
 
         for (; i < size; ++i) {
@@ -1027,11 +1125,13 @@ class delta_binary_packed_encoder : public value_encoder<ParquetType>
         header_writer.Flush();
 
         byte* data_pos = sink + header_writer.bytes_written();
-        std::copy(_encoded_buffer.begin(), _encoded_buffer.end(), data_pos);
+        size_t encoder_buffer_size = _encoded_buffer.size();
+        if (encoder_buffer_size > 0) {
+            std::memcpy(data_pos, _encoded_buffer.data(), encoder_buffer_size);
+        }
         _total_values = 0;
         _first_value = 0;
         _last_value = 0;
-        size_t encoder_buffer_size = _encoded_buffer.size();
         _encoded_buffer.clear();
         return {encoder_buffer_size + header_writer.bytes_written(), format::Encoding::DELTA_BINARY_PACKED};
     }

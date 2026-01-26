@@ -135,3 +135,18 @@ seastar_add_test(column_chunk_reader
 
 seastar_add_test(record_reader
         SOURCES record_reader_test.cc)
+
+seastar_add_test(encoding_optimization
+        SOURCES encoding_optimization_test.cc)
+
+# Benchmark executable (not a unit test)
+add_executable(encoding_benchmark encoding_benchmark.cc)
+target_link_libraries(encoding_benchmark
+        PRIVATE
+        seastar
+        parquet4seastar
+        Boost::unit_test_framework)
+target_include_directories(encoding_benchmark
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(tests encoding_benchmark)
