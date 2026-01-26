@@ -21,9 +21,15 @@
 
 #include <snappy.h>
 #include <zlib.h>
+
+#ifdef PARQUET4SEASTAR_WITH_ZSTD
 #include <zstd.h>
+#endif
+
+#ifdef PARQUET4SEASTAR_WITH_LZ4
 #include <lz4.h>
 #include <lz4frame.h>
+#endif
 
 #include <parquet4seastar/compression.hh>
 #include <parquet4seastar/exception.hh>
@@ -146,6 +152,7 @@ class gzip_compressor final : public compressor
     format::CompressionCodec::type type() const override { return format::CompressionCodec::GZIP; }
 };
 
+#ifdef PARQUET4SEASTAR_WITH_ZSTD
 class zstd_compressor final : public compressor
 {
     bytes decompress(bytes_view in, bytes&& out) const override {
@@ -190,7 +197,9 @@ class zstd_compressor final : public compressor
 
     format::CompressionCodec::type type() const override { return format::CompressionCodec::ZSTD; }
 };
+#endif  // PARQUET4SEASTAR_WITH_ZSTD
 
+#ifdef PARQUET4SEASTAR_WITH_LZ4
 class lz4_compressor final : public compressor
 {
     bytes decompress(bytes_view in, bytes&& out) const override {
@@ -248,6 +257,7 @@ class lz4_compressor final : public compressor
 
     format::CompressionCodec::type type() const override { return format::CompressionCodec::LZ4; }
 };
+#endif  // PARQUET4SEASTAR_WITH_LZ4
 
 std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type compression) {
     if (compression == format::CompressionCodec::UNCOMPRESSED) {
@@ -256,11 +266,18 @@ std::unique_ptr<compressor> compressor::make(format::CompressionCodec::type comp
         return std::make_unique<gzip_compressor>();
     } else if (compression == format::CompressionCodec::SNAPPY) {
         return std::make_unique<snappy_compressor>();
-    } else if (compression == format::CompressionCodec::ZSTD) {
+    }
+#ifdef PARQUET4SEASTAR_WITH_ZSTD
+    else if (compression == format::CompressionCodec::ZSTD) {
         return std::make_unique<zstd_compressor>();
-    } else if (compression == format::CompressionCodec::LZ4) {
+    }
+#endif
+#ifdef PARQUET4SEASTAR_WITH_LZ4
+    else if (compression == format::CompressionCodec::LZ4) {
         return std::make_unique<lz4_compressor>();
-    } else {
+    }
+#endif
+    else {
         throw parquet_exception(seastar::format("Unsupported compression ({})", static_cast<int32_t>(compression)));
     }
 }
